@@ -12,3 +12,4 @@ tokio = { version = "1", features = ["full"] }
 regex = "1.5"
 percent-encoding = "2.1"
 unescape = "0.1.0"
+lazy_static = "1.4.0"

@@ -8,17 +8,20 @@ use serenity::{
 
 use percent_encoding::{utf8_percent_encode, CONTROLS};
 use unescape::unescape;
+use lazy_static::lazy_static;
 
 struct Handler;
 
-async fn search(wiki: &str, query: &str, client: &reqwest::Client) -> Result<CreateEmbed, Box<dyn Error>> {
-    let api_title_regex = Regex::new(r#""title":"(.+?)".*"#).unwrap();
+lazy_static! {
+    static ref API_TITLE_REGEX: Regex = Regex::new(r#""title":"(.+?)".*"#).unwrap();
     // Backslash match at the end to prevent panic when unescaping unicode
-    let api_excerpt_regex = Regex::new(r#""extract":"(.+?)\\?""#).unwrap();
+    static ref API_EXCERPT_REGEX: Regex = Regex::new(r#""extract":"(.+?)\\?""#).unwrap();
+    static ref PAGE_TITLE_REGEX: Regex = Regex::new(r"<title>(.*) - Wikipedia</title>").unwrap();
+    static ref PAGE_THUMBNAIL_REGEX: Regex = Regex::new(r#"<meta property="og:image" content="(.+?)""#).unwrap();
+}
 
-    let page_title_regex = Regex::new(r"<title>(.*) - Wikipedia</title>").unwrap();
-    let page_thumbnail_regex= Regex::new(r#"<meta property="og:image" content="(.+?)""#).unwrap();
 
+async fn search(wiki: &str, query: &str, client: &reqwest::Client) -> Result<CreateEmbed, Box<dyn Error>> {
     let search_url = format!("{}/w/api.php?action=query&format=json&list=search&formatversion=2&srwhat=nearmatch&srinfo=&srprop=&srsearch={}", wiki, query); 
     let mut info_url = format!("{}/w/api.php?format=json&action=query&prop=extracts&exchars=300&explaintext&redirects=1&titles=", wiki);
 
@@ -27,14 +30,14 @@ async fn search(wiki: &str, query: &str, client: &reqwest::Client) -> Result<Cre
         .await?; 
 
     let mut e = CreateEmbed::default();
-    match api_title_regex.captures(&body) {
+    match API_TITLE_REGEX.captures(&body) {
         Some(v) => {
             let page_url = format!("{}/wiki/{}", wiki, utf8_percent_encode(&v[1], CONTROLS));
             let page_text = client.get(&page_url).send()
                 .await?.text()
                 .await?; 
 
-            let page_title = match page_title_regex.captures(&page_text) {
+            let page_title = match PAGE_TITLE_REGEX.captures(&page_text) {
                 Some(v) => String::from(&v[1]),
                 None => String::from("")
             };
@@ -47,11 +50,11 @@ async fn search(wiki: &str, query: &str, client: &reqwest::Client) -> Result<Cre
 
             e.title(&page_title);
             e.url(&page_url);
-            e.description(match &api_excerpt_regex.captures(&page_excerpt) {
+            e.description(match &API_EXCERPT_REGEX.captures(&page_excerpt) {
                 Some(v) => String::from(unescape(&v[1]).unwrap()),
                 None => String::from("")
             });
-            e.thumbnail(match page_thumbnail_regex.captures(&page_text) {
+            e.thumbnail(match PAGE_THUMBNAIL_REGEX.captures(&page_text) {
                 Some(v) => String::from(unescape(&v[1]).unwrap()),
                 None => String::from("")
             });
