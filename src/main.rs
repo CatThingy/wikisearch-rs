@@ -14,17 +14,21 @@ use unescape::unescape;
 struct Handler;
 
 lazy_static! {
-    static ref API_TITLE_REGEX: Regex = Regex::new(r#""title":"(.+?)".*"#).unwrap();
+    static ref QUERY_REGEX: Regex = Regex::new(r"\[\[(?:(?P<wiki>.+)\|)?(?P<query>.+?)\|?\]\]").unwrap();
+    static ref API_TITLE_REGEX: Regex = Regex::new(r#""title":"(?P<title>.+?)".*"#).unwrap();
     // Backslash match at the end to prevent panic when unescaping unicode
-    static ref API_EXCERPT_REGEX: Regex = Regex::new(r#""extract":"(.+?)\\?""#).unwrap();
-    static ref PAGE_TITLE_REGEX: Regex = Regex::new(r"<title>(.*) - Wikipedia</title>").unwrap();
-    static ref PAGE_THUMBNAIL_REGEX: Regex = Regex::new(r#"<meta property="og:image" content="(.+?)""#).unwrap();
-    static ref QUERY_REGEX: Regex = Regex::new(r"\[\[(.+?)\]\]").unwrap();
+    static ref API_EXCERPT_REGEX: Regex = Regex::new(r#""extract":"(?P<summary>.+?)\\?""#).unwrap();
+    static ref PAGE_TITLE_REGEX: Regex = Regex::new(r"<title>(?P<title>.*) - Wikipedia</title>").unwrap();
+    static ref PAGE_THUMBNAIL_REGEX: Regex = Regex::new(r#"<meta property="og:image" content="(?P<thumbnail>.+?)""#).unwrap();
 }
 
 async fn search(wiki: &str, query: &str, client: &reqwest::Client) -> Result<CreateEmbed, Box<dyn Error>> {
-    let search_url = format!("{}/w/api.php?action=query&format=json&list=search&formatversion=2&srwhat=nearmatch&srinfo=&srprop=&srsearch={}", wiki, query);
-    let mut info_url = format!("{}/w/api.php?format=json&action=query&prop=extracts&exchars=300&explaintext&redirects=1&titles=", wiki);
+    let search_url = format!(
+        "{}/w/api.php?action=query&format=json&list=search&formatversion=2&srwhat=nearmatch&srinfo=&srprop=&srsearch={}",
+        wiki,
+        &utf8_percent_encode(query, NON_ALPHANUMERIC).collect::<String>()
+    );
+    let mut info_url = format!("{}/w/api.php?format=json&action=query&prop=extracts&exchars=500&explaintext&redirects=1&titles=", wiki);
 
     let body = client.get(&search_url).send().await?.text().await?;
 
@@ -34,27 +38,28 @@ async fn search(wiki: &str, query: &str, client: &reqwest::Client) -> Result<Cre
             let page_url = format!(
                 "{}/wiki/{}",
                 wiki,
-                utf8_percent_encode(&v[1], NON_ALPHANUMERIC)
+                &utf8_percent_encode(&v["title"], NON_ALPHANUMERIC).collect::<String>()
             );
             let page_text = client.get(&page_url).send().await?.text().await?;
 
             let page_title = match PAGE_TITLE_REGEX.captures(&page_text) {
-                Some(v) => String::from(&v[1]),
+                Some(v) => String::from(&v["title"]),
                 None => String::from(""),
             };
 
-            info_url.push_str(&page_title);
+            info_url
+                .push_str(&utf8_percent_encode(&page_title, NON_ALPHANUMERIC).collect::<String>());
 
             let page_excerpt = client.get(&info_url).send().await?.text().await?;
 
             e.title(&page_title);
             e.url(&page_url);
             e.description(match &API_EXCERPT_REGEX.captures(&page_excerpt) {
-                Some(v) => String::from(unescape(&v[1]).unwrap()),
+                Some(v) => String::from(unescape(&v["summary"]).unwrap()),
                 None => String::from(""),
             });
             e.thumbnail(match PAGE_THUMBNAIL_REGEX.captures(&page_text) {
-                Some(v) => String::from(unescape(&v[1]).unwrap()),
+                Some(v) => String::from(unescape(&v["thumbnail"]).unwrap()),
                 None => String::from(""),
             });
         }
@@ -77,20 +82,18 @@ impl EventHandler for Handler {
 
         if QUERY_REGEX.is_match(&msg.content) {
             let captures = QUERY_REGEX.captures_iter(&msg.content);
-            let enumerated_captures = QUERY_REGEX.captures_iter(&msg.content).enumerate();
+            let mut captured_text = Vec::<String>::new();
 
             for capture in captures {
                 let mut e = CreateEmbed::default();
-                e.title(format!("Searching for {}...", &capture[1]));
+                e.title(format!("Searching for {}...", &capture["query"]));
                 embeds.push(e);
+                captured_text.push(capture["query"].to_string());
             }
 
             let mut message = match msg
                 .channel_id
-                .send_message(&ctx.http, |m| {
-                    m.set_embeds(embeds.clone());
-                    m
-                })
+                .send_message(&ctx.http, |m| m.set_embeds(embeds))
                 .await
             {
                 Ok(v) => v,
@@ -100,22 +103,18 @@ impl EventHandler for Handler {
                 }
             };
 
-            for (i, capture) in enumerated_captures {
-                match search("https://en.wikipedia.org", &capture[1], &client).await {
+            embeds = Vec::<CreateEmbed>::new();
+
+            for capture in captured_text {
+                match search("https://en.wikipedia.org", &capture, &client).await {
                     Ok(v) => {
-                        embeds[i] = v;
+                        embeds.push(v);
                     }
                     Err(e) => println!("{:?}", e),
                 };
             }
 
-            if let Err(why) = message
-                .edit(&ctx.http, |m| {
-                    m.set_embeds(embeds);
-                    m
-                })
-                .await
-            {
+            if let Err(why) = message.edit(&ctx.http, |m| m.set_embeds(embeds)).await {
                 println!("damnit: {:?}", why);
             }
         }
