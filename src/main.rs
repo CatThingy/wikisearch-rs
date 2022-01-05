@@ -3,7 +3,7 @@ use regex::Regex;
 use serenity::{
     async_trait,
     model::{channel::Message, gateway::Ready},
-    prelude::*, builder::{CreateEmbed, CreateMessage}
+    prelude::*, builder::CreateEmbed
 };
 
 use percent_encoding::{utf8_percent_encode, CONTROLS};
@@ -74,17 +74,38 @@ impl EventHandler for Handler {
         let query_regex = Regex::new(r"\[\[(.+?)\]\]").unwrap(); 
         let mut embeds = Vec::<CreateEmbed>::new();
         let client = reqwest::Client::new();
-        for capture in query_regex.captures_iter(&msg.content) {
-            match search("https://en.wikipedia.org", &capture[1], &client).await {
-                Ok(v) => {    
-                    embeds.push(v);
-                }
-                Err(e) => println!("{:?}", e)
-            };
-        }
+        
+        if query_regex.is_match(&msg.content) {
+            let captures = query_regex.captures_iter(&msg.content);
+            let enumerated_captures = query_regex.captures_iter(&msg.content).enumerate();
 
-        if embeds.len() > 0 {
-            if let Err(why) = msg.channel_id.send_message(&ctx.http, |m| {
+            for capture in captures {
+                let mut e = CreateEmbed::default();
+                e.title(format!("Searching for {}...", &capture[1]));
+                embeds.push(e);
+            }
+
+            let mut message = match msg.channel_id.send_message(&ctx.http, |m| {
+                m.set_embeds(embeds.clone());
+                m
+            }).await{
+                Ok(v) => v,
+                Err(e) => {
+                    println!("{:?}", e);
+                    return;
+                }
+            };
+
+            for (i, capture) in enumerated_captures {
+                match search("https://en.wikipedia.org", &capture[1], &client).await {
+                    Ok(v) => {    
+                        embeds[i] = v;
+                    }
+                    Err(e) => println!("{:?}", e)
+                };
+            }
+
+            if let Err(why) = message.edit(&ctx.http, |m| {
                 m.set_embeds(embeds);
                 m
             }).await {
