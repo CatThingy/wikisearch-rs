@@ -7,5 +7,8 @@ edition = "2021"
 
 [dependencies]
 serenity = { version = "0.10", default-features = false, features = ["builder", "cache", "client", "gateway", "http", "model", "utils", "rustls_backend"]}
-reqwest="0.11"
+reqwest = "0.11"
 tokio = { version = "1", features = ["full"] }
+regex = "1.5"
+percent-encoding = "2.1"
+unescape = "0.1.0"
