@@ -6,7 +6,7 @@ use serenity::{
     prelude::*, builder::CreateEmbed
 };
 
-use percent_encoding::{utf8_percent_encode, CONTROLS};
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use unescape::unescape;
 use lazy_static::lazy_static;
 
@@ -18,6 +18,7 @@ lazy_static! {
     static ref API_EXCERPT_REGEX: Regex = Regex::new(r#""extract":"(.+?)\\?""#).unwrap();
     static ref PAGE_TITLE_REGEX: Regex = Regex::new(r"<title>(.*) - Wikipedia</title>").unwrap();
     static ref PAGE_THUMBNAIL_REGEX: Regex = Regex::new(r#"<meta property="og:image" content="(.+?)""#).unwrap();
+    static ref QUERY_REGEX: Regex = Regex::new(r"\[\[(.+?)\]\]").unwrap(); 
 }
 
 
@@ -32,7 +33,7 @@ async fn search(wiki: &str, query: &str, client: &reqwest::Client) -> Result<Cre
     let mut e = CreateEmbed::default();
     match API_TITLE_REGEX.captures(&body) {
         Some(v) => {
-            let page_url = format!("{}/wiki/{}", wiki, utf8_percent_encode(&v[1], CONTROLS));
+            let page_url = format!("{}/wiki/{}", wiki, utf8_percent_encode(&v[1], NON_ALPHANUMERIC));
             let page_text = client.get(&page_url).send()
                 .await?.text()
                 .await?; 
@@ -74,13 +75,12 @@ impl EventHandler for Handler {
             return
         }
 
-        let query_regex = Regex::new(r"\[\[(.+?)\]\]").unwrap(); 
         let mut embeds = Vec::<CreateEmbed>::new();
         let client = reqwest::Client::new();
         
-        if query_regex.is_match(&msg.content) {
-            let captures = query_regex.captures_iter(&msg.content);
-            let enumerated_captures = query_regex.captures_iter(&msg.content).enumerate();
+        if QUERY_REGEX.is_match(&msg.content) {
+            let captures = QUERY_REGEX.captures_iter(&msg.content);
+            let enumerated_captures = QUERY_REGEX.captures_iter(&msg.content).enumerate();
 
             for capture in captures {
                 let mut e = CreateEmbed::default();
