@@ -3,7 +3,11 @@ use rusqlite::Connection;
 use serenity::{
     async_trait,
     builder::CreateEmbed,
-    model::{channel::Message, gateway::Ready},
+    model::{
+        channel::Message,
+        gateway::Ready,
+        guild::{Guild, GuildUnavailable},
+    },
     prelude::*,
 };
 use std::{env, error::Error, fs::create_dir_all};
@@ -255,6 +259,21 @@ impl EventHandler for Handler {
 
     async fn ready(&self, _: Context, ready: Ready) {
         println!("{} connected succesfully", ready.user.name);
+    }
+
+    async fn guild_delete(&self, _: Context, _: GuildUnavailable, guild: Option<Guild>) {
+        match guild {
+            Some(g) => {
+                let server = format!("s{}", g.id);
+                let connection = Connection::open(DATABASE_LOCATION).unwrap();
+                match connection.execute(format!("DROP TABLE {}", server).as_str(), []) {
+                    Err(e) => println!("{}",e),
+                    _ => {}
+                }
+            }
+
+            None => {}
+        }
     }
 }
 
