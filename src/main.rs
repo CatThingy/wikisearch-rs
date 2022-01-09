@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use serenity::{
     async_trait,
     builder::CreateEmbed,
-    model::{channel::Message, gateway::Ready, id::GuildId},
+    model::{channel::Message, gateway::Ready},
     prelude::*,
 };
 use std::{env, error::Error, fs::create_dir_all};
@@ -62,7 +62,9 @@ async fn search(
             e.title(&v["title"]);
             e.url(&page_url);
             e.description(match &API_EXCERPT_REGEX.captures(&page_excerpt) {
-                Some(v) => unescape(&v["summary"]).unwrap_or("No summary could be found".to_string()),
+                Some(v) => {
+                    unescape(&v["summary"]).unwrap_or("No summary could be found".to_string())
+                }
                 None => String::from("No summary could be found"),
             });
             e.thumbnail(match PAGE_THUMBNAIL_REGEX.captures(&page_text) {
@@ -77,25 +79,115 @@ async fn search(
     Ok(e)
 }
 
+fn init_table(name: &str) {
+    create_dir_all("data").unwrap();
+    let connection = Connection::open(DATABASE_LOCATION).unwrap();
+    match connection
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=:name",
+            &[(":name", name)],
+            |row| row.get(0),
+        )
+        .expect("err:")
+    {
+        0 => {
+            let default_values = vec![
+                ("default", "https://en.wikipedia.org"),
+                // Top 10 wikipedias
+                ("en", "https://en.wikipedia.org"),
+                ("de", "https://de.wikipedia.org"),
+                ("fr", "https://fr.wikipedia.org"),
+                ("ja", "https://ja.wikipedia.org"),
+                ("es", "https://es.wikipedia.org"),
+                ("ru", "https://ru.wikipedia.org"),
+                ("pt", "https://pt.wikipedia.org"),
+                ("zh", "https://zh.wikipedia.org"),
+                ("it", "https://it.wikipedia.org"),
+                ("ar", "https://ar.wikipedia.org"),
+            ];
+            connection
+                .execute(
+                    format!(
+                        "CREATE TABLE IF NOT EXISTS {} 
+                    (
+                        alias TEXT NOT NULL UNIQUE,
+                        wiki TEXT
+                    )",
+                        name
+                    )
+                    .as_str(),
+                    [],
+                )
+                .unwrap();
+
+            let mut statement = connection
+                .prepare(
+                    format!(
+                        "
+                    INSERT INTO {} VALUES (:alias, :wiki)
+                ",
+                        name
+                    )
+                    .as_str(),
+                )
+                .unwrap();
+
+            for value in default_values.into_iter() {
+                statement
+                    .execute(&[(":alias", value.0), (":wiki", value.1)])
+                    .unwrap();
+            }
+        }
+        _ => {}
+    }
+}
+
 fn get_wiki(alias: Option<String>, server: &String) -> Option<String> {
-    let connection = rusqlite::Connection::open("data/config.db").unwrap();
+    let connection = rusqlite::Connection::open(DATABASE_LOCATION).unwrap();
     let mut statement = connection
         .prepare(format!("SELECT wiki FROM {} WHERE alias = :alias", server).as_str())
         .unwrap();
-    let result = statement
-        .query_row(
-            &[
-                (":alias", &alias.unwrap_or("default".to_string())),
-            ],
-            |row| {
-                Ok(row.get::<_, String>(0).unwrap().to_string())
-            },
-        );
+    let result = statement.query_row(
+        &[(":alias", &alias.unwrap_or("default".to_string()))],
+        |row| Ok(row.get::<_, String>(0).unwrap().to_string()),
+    );
 
     match result {
         Ok(v) => return Some(v),
         Err(_) => return None,
     }
+}
+
+fn add_wiki(alias: String, wiki: String, server: &String) {
+    let connection = Connection::open(DATABASE_LOCATION).unwrap();
+    let mut statement = connection
+        .prepare(
+            format!(
+                "UPDATE {}
+                SET wiki = :wiki
+                WHERE alias = :alias",
+                server
+            )
+            .as_str(),
+        )
+        .unwrap();
+    statement
+        .execute(&[(":alias", &alias), (":wiki", &wiki)])
+        .unwrap();
+
+    statement = connection
+        .prepare(
+            format!(
+                "INSERT OR IGNORE INTO {}
+                (alias, wiki) VALUES (:alias, :wiki)",
+                server
+            )
+            .as_str(),
+        )
+        .unwrap();
+    statement
+        .execute(&[(":alias", &alias), (":wiki", &wiki)])
+        .unwrap();
 }
 
 #[async_trait]
@@ -163,59 +255,6 @@ impl EventHandler for Handler {
 
     async fn ready(&self, _: Context, ready: Ready) {
         println!("{} connected succesfully", ready.user.name);
-    }
-}
-
-fn init_table(name: &str) {
-    create_dir_all("data").unwrap();
-    let connection = Connection::open(DATABASE_LOCATION).unwrap();
-    match connection
-        .query_row(
-            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=:name",
-            &[(":name", name)],
-            |row| row.get(0),
-        )
-        .expect("err:")
-    {
-        0 => {
-            let default_values = vec![
-                ("default", "https://en.wikipedia.org"),
-                // Top 10 wikipedias
-                ("en", "https://en.wikipedia.org"),
-                ("de", "https://de.wikipedia.org"),
-                ("fr", "https://fr.wikipedia.org"),
-                ("ja", "https://ja.wikipedia.org"),
-                ("es", "https://es.wikipedia.org"),
-                ("ru", "https://ru.wikipedia.org"),
-                ("pt", "https://pt.wikipedia.org"),
-                ("zh", "https://zh.wikipedia.org"),
-                ("it", "https://it.wikipedia.org"),
-                ("ar", "https://ar.wikipedia.org"),
-            ];
-            connection
-                .execute(
-                    format!("CREATE TABLE IF NOT EXISTS {} 
-                    (
-                        alias TEXT,
-                        wiki TEXT
-                    )", name).as_str(),
-                    []
-                )
-                .unwrap();
-
-            let mut statement = connection
-                .prepare(
-                    format!("
-                    INSERT INTO {} VALUES (:alias, :wiki)
-                ", name).as_str(),
-                )
-                .unwrap();
-
-            for value in default_values.into_iter() {
-                statement.execute(&[(":alias", value.0), (":wiki", value.1)]).unwrap();
-            }
-        }
-        _ => {}
     }
 }
 
