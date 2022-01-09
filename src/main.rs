@@ -1,32 +1,44 @@
 use regex::Regex;
+use rusqlite::Connection;
 use serenity::{
     async_trait,
     builder::CreateEmbed,
-    model::{channel::Message, gateway::Ready},
+    model::{channel::Message, gateway::Ready, id::GuildId},
     prelude::*,
 };
-use std::{env, error::Error};
+use std::{env, error::Error, fs::create_dir_all};
 
 use lazy_static::lazy_static;
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use unescape::unescape;
 
+static DATABASE_LOCATION: &str = "data/config.db";
+
 struct Handler;
+
+struct Search {
+    alias: Option<String>,
+    query: String,
+}
 
 lazy_static! {
     static ref QUERY_REGEX: Regex = Regex::new(r"\[\[(?:(?P<wiki>.+)\|)?(?P<query>.+?)\|?\]\]").unwrap();
     static ref API_TITLE_REGEX: Regex = Regex::new(r#""title":"(?P<title>.+?)".*"#).unwrap();
     // Backslash match at the end to prevent panic when unescaping unicode
     static ref API_EXCERPT_REGEX: Regex = Regex::new(r#""extract":"(?P<summary>.+?)\\?""#).unwrap();
-    static ref PAGE_TITLE_REGEX: Regex = Regex::new(r"<title>(?P<title>.*) - Wikipedia</title>").unwrap();
     static ref PAGE_THUMBNAIL_REGEX: Regex = Regex::new(r#"<meta property="og:image" content="(?P<thumbnail>.+?)""#).unwrap();
 }
 
-async fn search(wiki: &str, query: &str, client: &reqwest::Client) -> Result<CreateEmbed, Box<dyn Error>> {
+async fn search(
+    search: Search,
+    client: &reqwest::Client,
+    server: &String,
+) -> Result<CreateEmbed, Box<dyn Error>> {
+    let wiki = get_wiki(search.alias, server).unwrap_or("https://en.wikipedia.org".to_string());
     let search_url = format!(
-        "{}/w/api.php?action=query&format=json&list=search&formatversion=2&srwhat=nearmatch&srinfo=&srprop=&srsearch={}",
+        "{}/w/api.php?action=query&format=json&list=search&formatversion=2&srwhat=text&srinfo=&srprop=&srlimit=1&srsearch={}",
         wiki,
-        &utf8_percent_encode(query, NON_ALPHANUMERIC).collect::<String>()
+        &utf8_percent_encode(&search.query, NON_ALPHANUMERIC).collect::<String>()
     );
     let mut info_url = format!("{}/w/api.php?format=json&action=query&prop=extracts&exchars=500&explaintext&redirects=1&titles=", wiki);
 
@@ -42,21 +54,16 @@ async fn search(wiki: &str, query: &str, client: &reqwest::Client) -> Result<Cre
             );
             let page_text = client.get(&page_url).send().await?.text().await?;
 
-            let page_title = match PAGE_TITLE_REGEX.captures(&page_text) {
-                Some(v) => String::from(&v["title"]),
-                None => String::from(""),
-            };
-
             info_url
-                .push_str(&utf8_percent_encode(&page_title, NON_ALPHANUMERIC).collect::<String>());
+                .push_str(&utf8_percent_encode(&v["title"], NON_ALPHANUMERIC).collect::<String>());
 
             let page_excerpt = client.get(&info_url).send().await?.text().await?;
 
-            e.title(&page_title);
+            e.title(&v["title"]);
             e.url(&page_url);
             e.description(match &API_EXCERPT_REGEX.captures(&page_excerpt) {
-                Some(v) => String::from(unescape(&v["summary"]).unwrap()),
-                None => String::from(""),
+                Some(v) => unescape(&v["summary"]).unwrap_or("No summary could be found".to_string()),
+                None => String::from("No summary could be found"),
             });
             e.thumbnail(match PAGE_THUMBNAIL_REGEX.captures(&page_text) {
                 Some(v) => String::from(unescape(&v["thumbnail"]).unwrap()),
@@ -64,10 +71,31 @@ async fn search(wiki: &str, query: &str, client: &reqwest::Client) -> Result<Cre
             });
         }
         None => {
-            e.title(format!("No results found for {}", query));
+            e.title(format!("No results found for {}", &search.query));
         }
     }
     Ok(e)
+}
+
+fn get_wiki(alias: Option<String>, server: &String) -> Option<String> {
+    let connection = rusqlite::Connection::open("data/config.db").unwrap();
+    let mut statement = connection
+        .prepare(format!("SELECT wiki FROM {} WHERE alias = :alias", server).as_str())
+        .unwrap();
+    let result = statement
+        .query_row(
+            &[
+                (":alias", &alias.unwrap_or("default".to_string())),
+            ],
+            |row| {
+                Ok(row.get::<_, String>(0).unwrap().to_string())
+            },
+        );
+
+    match result {
+        Ok(v) => return Some(v),
+        Err(_) => return None,
+    }
 }
 
 #[async_trait]
@@ -77,18 +105,31 @@ impl EventHandler for Handler {
             return;
         }
 
+        let server = match &msg.guild_id {
+            Some(v) => format!("s{}", v.to_string()),
+            None => "default".to_string(),
+        };
+
         let mut embeds = Vec::<CreateEmbed>::new();
         let client = reqwest::Client::new();
 
         if QUERY_REGEX.is_match(&msg.content) {
+            init_table(&server);
+
             let captures = QUERY_REGEX.captures_iter(&msg.content);
-            let mut captured_text = Vec::<String>::new();
+            let mut captured_text = Vec::<Search>::new();
 
             for capture in captures {
                 let mut e = CreateEmbed::default();
                 e.title(format!("Searching for {}...", &capture["query"]));
                 embeds.push(e);
-                captured_text.push(capture["query"].to_string());
+                captured_text.push(Search {
+                    alias: match capture.get(1) {
+                        Some(v) => Some(v.as_str().to_string()),
+                        _ => None,
+                    },
+                    query: capture["query"].to_string(),
+                });
             }
 
             let mut message = match msg
@@ -106,7 +147,7 @@ impl EventHandler for Handler {
             embeds = Vec::<CreateEmbed>::new();
 
             for capture in captured_text {
-                match search("https://en.wikipedia.org", &capture, &client).await {
+                match search(capture, &client, &server).await {
                     Ok(v) => {
                         embeds.push(v);
                     }
@@ -122,6 +163,59 @@ impl EventHandler for Handler {
 
     async fn ready(&self, _: Context, ready: Ready) {
         println!("{} connected succesfully", ready.user.name);
+    }
+}
+
+fn init_table(name: &str) {
+    create_dir_all("data").unwrap();
+    let connection = Connection::open(DATABASE_LOCATION).unwrap();
+    match connection
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=:name",
+            &[(":name", name)],
+            |row| row.get(0),
+        )
+        .expect("err:")
+    {
+        0 => {
+            let default_values = vec![
+                ("default", "https://en.wikipedia.org"),
+                // Top 10 wikipedias
+                ("en", "https://en.wikipedia.org"),
+                ("de", "https://de.wikipedia.org"),
+                ("fr", "https://fr.wikipedia.org"),
+                ("ja", "https://ja.wikipedia.org"),
+                ("es", "https://es.wikipedia.org"),
+                ("ru", "https://ru.wikipedia.org"),
+                ("pt", "https://pt.wikipedia.org"),
+                ("zh", "https://zh.wikipedia.org"),
+                ("it", "https://it.wikipedia.org"),
+                ("ar", "https://ar.wikipedia.org"),
+            ];
+            connection
+                .execute(
+                    format!("CREATE TABLE IF NOT EXISTS {} 
+                    (
+                        alias TEXT,
+                        wiki TEXT
+                    )", name).as_str(),
+                    []
+                )
+                .unwrap();
+
+            let mut statement = connection
+                .prepare(
+                    format!("
+                    INSERT INTO {} VALUES (:alias, :wiki)
+                ", name).as_str(),
+                )
+                .unwrap();
+
+            for value in default_values.into_iter() {
+                statement.execute(&[(":alias", value.0), (":wiki", value.1)]).unwrap();
+            }
+        }
+        _ => {}
     }
 }
 
