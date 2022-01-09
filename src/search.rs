@@ -1,7 +1,6 @@
 use lazy_static::lazy_static;
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use regex::Regex;
-use rusqlite::Connection;
 use serenity::builder::CreateEmbed;
 use std::error::Error;
 use unescape::unescape;
@@ -25,13 +24,13 @@ pub async fn search(
     client: &reqwest::Client,
     server: &String,
 ) -> Result<CreateEmbed, Box<dyn Error>> {
-    let wiki = get_wiki(search.alias, server).unwrap_or("https://en.wikipedia.org".to_string());
+    let endpoint = get_endpoint(search.alias, server).unwrap_or("https://en.wikipedia.org".to_string());
     let search_url = format!(
-        "{}/w/api.php?action=query&format=json&list=search&formatversion=2&srwhat=text&srinfo=&srprop=&srlimit=1&srsearch={}",
-        wiki,
+        "{}?action=query&format=json&list=search&formatversion=2&srwhat=text&srinfo=&srprop=&srlimit=1&srsearch={}",
+        endpoint,
         &utf8_percent_encode(&search.query, NON_ALPHANUMERIC).collect::<String>()
     );
-    let mut info_url = format!("{}/w/api.php?format=json&action=query&prop=extracts&exchars=500&explaintext&redirects=1&titles=", wiki);
+    let mut info_url = format!("{}/w/api.php?format=json&action=query&prop=extracts&exchars=500&explaintext&redirects=1&titles=", endpoint);
 
     let body = client.get(&search_url).send().await?.text().await?;
 
@@ -40,7 +39,7 @@ pub async fn search(
         Some(v) => {
             let page_url = format!(
                 "{}/wiki/{}",
-                wiki,
+                endpoint,
                 &utf8_percent_encode(&v["title"], NON_ALPHANUMERIC).collect::<String>()
             );
             let page_text = client.get(&page_url).send().await?.text().await?;
@@ -70,10 +69,10 @@ pub async fn search(
     Ok(e)
 }
 
-fn get_wiki(alias: Option<String>, server: &String) -> Option<String> {
+fn get_endpoint(alias: Option<String>, server: &String) -> Option<String> {
     let connection = rusqlite::Connection::open(DATABASE_LOCATION).unwrap();
     let mut statement = connection
-        .prepare(format!("SELECT wiki FROM {} WHERE alias = :alias", server).as_str())
+        .prepare(format!("SELECT endpoint FROM {} WHERE alias = :alias", server).as_str())
         .unwrap();
     let result = statement.query_row(
         &[(":alias", &alias.unwrap_or("default".to_string()))],
@@ -86,49 +85,3 @@ fn get_wiki(alias: Option<String>, server: &String) -> Option<String> {
     }
 }
 
-pub fn set_wiki(alias: String, wiki: String, server: &String) {
-    let connection = Connection::open(DATABASE_LOCATION).unwrap();
-    let mut statement = connection
-        .prepare(
-            format!(
-                "UPDATE {}
-                SET wiki = :wiki
-                WHERE alias = :alias",
-                server
-            )
-            .as_str(),
-        )
-        .unwrap();
-    statement
-        .execute(&[(":alias", &alias), (":wiki", &wiki)])
-        .unwrap();
-
-    statement = connection
-        .prepare(
-            format!(
-                "INSERT OR IGNORE INTO {}
-                (alias, wiki) VALUES (:alias, :wiki)",
-                server
-            )
-            .as_str(),
-        )
-        .unwrap();
-    statement
-        .execute(&[(":alias", &alias), (":wiki", &wiki)])
-        .unwrap();
-}
-
-pub fn delete_wiki(alias: String, server: &String) {
-    let connection = Connection::open(DATABASE_LOCATION).unwrap();
-    let mut statement = connection
-        .prepare(
-            format!(
-                "DELETE FROM {}
-                WHERE alias = :alias",
-                server
-            )
-            .as_str(),
-        )
-        .unwrap();
-    statement.execute(&[(":alias", &alias)]).unwrap();
-}

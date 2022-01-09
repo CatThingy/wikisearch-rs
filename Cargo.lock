@@ -1658,7 +1658,6 @@ dependencies = [
  "serenity",
  "tokio",
  "unescape",
- "unicode-normalization",
 ]
 
 [[package]]
