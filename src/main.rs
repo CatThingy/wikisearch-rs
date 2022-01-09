@@ -162,7 +162,7 @@ fn get_wiki(alias: Option<String>, server: &String) -> Option<String> {
     }
 }
 
-fn add_wiki(alias: String, wiki: String, server: &String) {
+fn set_wiki(alias: String, wiki: String, server: &String) {
     let connection = Connection::open(DATABASE_LOCATION).unwrap();
     let mut statement = connection
         .prepare(
@@ -191,6 +191,23 @@ fn add_wiki(alias: String, wiki: String, server: &String) {
         .unwrap();
     statement
         .execute(&[(":alias", &alias), (":wiki", &wiki)])
+        .unwrap();
+}
+
+fn delete_wiki(alias: String, server: &String) {
+    let connection = Connection::open(DATABASE_LOCATION).unwrap();
+    let mut statement = connection
+        .prepare(
+            format!(
+                "DELETE FROM {}
+                WHERE alias = :alias",
+                server
+            )
+            .as_str(),
+        )
+        .unwrap();
+    statement
+        .execute(&[(":alias", &alias)])
         .unwrap();
 }
 
