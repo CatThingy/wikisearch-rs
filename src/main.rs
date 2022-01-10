@@ -231,7 +231,7 @@ impl EventHandler for Handler {
                 println!("Cannot respond to slash command: {}", why);
             } else {
                 let content = match command.data.name.as_str() {
-                    "alias" => {
+                    "endpoint" => {
                         let subcmd = &command.data.options[0];
                         let mut options = HashMap::<String, String>::new();
                         let server = &format!("s{}", command.guild_id.unwrap().to_string());
