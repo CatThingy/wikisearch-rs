@@ -146,58 +146,59 @@ impl EventHandler for Handler {
 
     async fn ready(&self, ctx: Context, ready: Ready) {
         println!("{} connected succesfully", ready.user.name);
-
-        if let Err(why) = ApplicationCommand::create_global_application_command(
+        if let Err(why) = ApplicationCommand::set_global_application_commands(
             &ctx.http,
-            |command| {
-                command
-                    .name("endpoint")
-                    .description("Modify server wiki aliases")
-                    .create_option(|option| {
-                        option
-                            .name("set")
-                            .description("Add or edit an alias")
-                            .kind(ApplicationCommandOptionType::SubCommand)
-                            .create_sub_option(|subopt| {
-                                subopt
-                                    .name("alias")
-                                    .description(
-                                        "Alias to use for the endpoint i.e. [[alias|query]]",
-                                    )
-                                    .required(true)
-                                    .kind(ApplicationCommandOptionType::String)
+            |commands| {
+                commands
+                    .create_application_command(|command| {
+                        command
+                            .name("endpoint")
+                            .description("Modify server wiki endpoints")
+                            .create_option(|option| {
+                                option
+                                    .name("set")
+                                    .description("Add or edit an endpoint")
+                                    .kind(ApplicationCommandOptionType::SubCommand)
+                                    .create_sub_option(|subopt| {
+                                        subopt
+                                            .name("alias")
+                                            .description(
+                                                "Alias to use for the endpoint i.e. [[alias|query]]",
+                                            )
+                                            .required(true)
+                                            .kind(ApplicationCommandOptionType::String)
+                                    })
+                                    .create_sub_option(|subopt| {
+                                        subopt
+                                            .name("url")
+                                            .description("The API endpoint associated with the alias.\nThis ends in /api.php")
+                                            .required(true)
+                                            .kind(ApplicationCommandOptionType::String)
+                                    })
                             })
-                            .create_sub_option(|subopt| {
-                                subopt
-                                    .name("url")
-                                    .description("The API endpoint associated with the alias.\nThis ends in /api.php")
-                                    .required(true)
-                                    .kind(ApplicationCommandOptionType::String)
+                            .create_option(|option| {
+                                option
+                                    .name("delete")
+                                    .description("Delete an endpoint")
+                                    .kind(ApplicationCommandOptionType::SubCommand)
+                                    .create_sub_option(|subopt| {
+                                        subopt
+                                            .name("alias")
+                                            .description("Alias of the endpoint to delete")
+                                            .required(true)
+                                            .kind(ApplicationCommandOptionType::String)
+                                    })
                             })
-                    })
-                    .create_option(|option| {
-                        option
-                            .name("delete")
-                            .description("Delete an endpoint")
-                            .kind(ApplicationCommandOptionType::SubCommand)
-                            .create_sub_option(|subopt| {
-                                subopt
-                                    .name("alias")
-                                    .description("Alias of the endpoint to delete")
-                                    .required(true)
-                                    .kind(ApplicationCommandOptionType::String)
+                            .create_option(|option| {
+                                option
+                                    .name("list")
+                                    .description("List all available endpoints")
+                                    .kind(ApplicationCommandOptionType::SubCommand)
                             })
-                    })
-                    .create_option(|option| {
-                        option
-                            .name("list")
-                            .description("List all aliases")
-                            .kind(ApplicationCommandOptionType::SubCommand)
-                    })
-            },
-        )
-        .await{
-            println!("e: {}", why)
+                },
+            )
+        }).await {
+            println!("Error: {}", why);
         };
     }
 

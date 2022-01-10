@@ -81,8 +81,6 @@ fn get_endpoint(alias: Option<String>, server: &String) -> Result<String, Box<dy
             (":alias", &alias.unwrap_or("default".to_string())),
             (":server", server),
         ],
-        |row| {
-            Ok(row.get::<_, String>(0)?.to_string())
-        },
+        |row| Ok(row.get::<_, String>(0)?.to_string()),
     )?)
 }
