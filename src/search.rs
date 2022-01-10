@@ -24,7 +24,8 @@ pub async fn search(
     client: &reqwest::Client,
     server: &String,
 ) -> Result<CreateEmbed, Box<dyn Error>> {
-    let endpoint = get_endpoint(search.alias, server).unwrap_or("https://en.wikipedia.org".to_string());
+    let endpoint =
+        get_endpoint(search.alias, server).unwrap_or("https://en.wikipedia.org".to_string());
     let search_url = format!(
         "{}?action=query&format=json&list=search&formatversion=2&srwhat=text&srinfo=&srprop=&srlimit=1&srsearch={}",
         endpoint,
@@ -58,8 +59,10 @@ pub async fn search(
                 None => String::from("No summary could be found"),
             });
             e.thumbnail(match PAGE_THUMBNAIL_REGEX.captures(&page_text) {
-                Some(v) => String::from(unescape(&v["thumbnail"]).unwrap()),
-                None => String::from(""),
+                Some(v) => unescape(&v["thumbnail"])
+                    .unwrap_or("".to_string())
+                    .to_string(),
+                None => "".to_string(),
             });
         }
         None => {
@@ -69,19 +72,17 @@ pub async fn search(
     Ok(e)
 }
 
-fn get_endpoint(alias: Option<String>, server: &String) -> Option<String> {
-    let connection = rusqlite::Connection::open(DATABASE_LOCATION).unwrap();
+fn get_endpoint(alias: Option<String>, server: &String) -> Result<String, Box<dyn Error>> {
+    let connection = rusqlite::Connection::open(DATABASE_LOCATION)?;
     let mut statement = connection
-        .prepare("SELECT endpoint FROM config WHERE alias = :alias AND name = :server")
-        .unwrap();
-    let result = statement.query_row(
-        &[(":alias", &alias.unwrap_or("default".to_string())), (":server", server)],
-        |row| Ok(row.get::<_, String>(0).unwrap().to_string()),
-    );
-
-    match result {
-        Ok(v) => return Some(v),
-        Err(_) => return None,
-    }
+        .prepare("SELECT endpoint FROM config WHERE alias = :alias AND name = :server")?;
+    Ok(statement.query_row(
+        &[
+            (":alias", &alias.unwrap_or("default".to_string())),
+            (":server", server),
+        ],
+        |row| {
+            Ok(row.get::<_, String>(0)?.to_string())
+        },
+    )?)
 }
-

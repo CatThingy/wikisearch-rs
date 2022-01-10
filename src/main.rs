@@ -10,7 +10,7 @@ use serenity::{
     model::{
         channel::Message,
         gateway::Ready,
-        guild::{Guild, GuildUnavailable},
+        guild::GuildUnavailable,
         interactions::{
             application_command::{
                 ApplicationCommand, ApplicationCommandInteractionDataOptionValue,
@@ -151,7 +151,7 @@ impl EventHandler for Handler {
             &ctx.http,
             |command| {
                 command
-                    .name("alias")
+                    .name("endpoint")
                     .description("Modify server wiki aliases")
                     .create_option(|option| {
                         option
@@ -161,29 +161,30 @@ impl EventHandler for Handler {
                             .create_sub_option(|subopt| {
                                 subopt
                                     .name("alias")
-                                    .required(true)
                                     .description(
-                                        "Alias to use in a search i.e. [[alias|query]]",
+                                        "Alias to use for the endpoint i.e. [[alias|query]]",
                                     )
+                                    .required(true)
                                     .kind(ApplicationCommandOptionType::String)
                             })
                             .create_sub_option(|subopt| {
                                 subopt
-                                    .name("endpoint")
-                                    .required(true)
+                                    .name("url")
                                     .description("The API endpoint associated with the alias.\nThis ends in /api.php")
+                                    .required(true)
                                     .kind(ApplicationCommandOptionType::String)
                             })
                     })
                     .create_option(|option| {
                         option
                             .name("delete")
-                            .description("Delete an alias")
+                            .description("Delete an endpoint")
                             .kind(ApplicationCommandOptionType::SubCommand)
                             .create_sub_option(|subopt| {
                                 subopt
                                     .name("alias")
-                                    .description("Alias to delete")
+                                    .description("Alias of the endpoint to delete")
+                                    .required(true)
                                     .kind(ApplicationCommandOptionType::String)
                             })
                     })
@@ -200,7 +201,7 @@ impl EventHandler for Handler {
         };
     }
 
-    async fn guild_delete(&self, _: Context, guild: GuildUnavailable, _: Option<Guild>) {
+    async fn guild_delete(&self, _: Context, guild: GuildUnavailable) {
         let server = format!("s{}", guild.id);
         let connection = Connection::open(DATABASE_LOCATION).unwrap();
         match connection.execute(
@@ -246,17 +247,20 @@ impl EventHandler for Handler {
                         init_server(server);
                         match subcmd.name.as_str() {
                             "set" => {
-                                set_endpoint(&options["alias"], &options["endpoint"], server);
-                                format!(
-                                    "Added `{}` as an alias for `{}`",
-                                    &options["alias"], &options["endpoint"]
-                                )
+                                match set_endpoint(&options["alias"], &options["endpoint"], server)
+                                {
+                                    Ok(v) => v,
+                                    Err(e) => format!("An error occured: {:?}", e),
+                                }
                             }
-                            "delete" => {
-                                delete_endpoint(&options["alias"], server);
-                                format!("Deleted alias `{}`", options["alias"])
-                            }
-                            "list" => all_endpoints(server),
+                            "delete" => match delete_endpoint(&options["alias"], server) {
+                                Ok(v) => v,
+                                Err(e) => format!("An error occured: {:?}", e),
+                            },
+                            "list" => match all_endpoints(server) {
+                                Ok(v) => v,
+                                Err(e) => format!("An error occured: {:?}", e),
+                            },
                             _ => "Command not recognized".to_string(),
                         }
                     }
