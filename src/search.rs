@@ -72,10 +72,10 @@ pub async fn search(
 fn get_endpoint(alias: Option<String>, server: &String) -> Option<String> {
     let connection = rusqlite::Connection::open(DATABASE_LOCATION).unwrap();
     let mut statement = connection
-        .prepare(format!("SELECT endpoint FROM {} WHERE alias = :alias", server).as_str())
+        .prepare("SELECT endpoint FROM config WHERE alias = :alias AND name = :server")
         .unwrap();
     let result = statement.query_row(
-        &[(":alias", &alias.unwrap_or("default".to_string()))],
+        &[(":alias", &alias.unwrap_or("default".to_string())), (":server", server)],
         |row| Ok(row.get::<_, String>(0).unwrap().to_string()),
     );
 

@@ -11,7 +11,6 @@ use serenity::{
         channel::Message,
         gateway::Ready,
         guild::{Guild, GuildUnavailable},
-        id::GuildId,
         interactions::{
             application_command::{
                 ApplicationCommand, ApplicationCommandInteractionDataOptionValue,
@@ -34,13 +33,12 @@ lazy_static! {
         Regex::new(r"\[\[(?:(?P<wiki>.+)\|)?(?P<query>.+?)\|?\]\]").unwrap();
 }
 
-fn init_table(name: &str) {
-    create_dir_all("data").unwrap();
+fn init_server(server: &str) {
     let connection = Connection::open(DATABASE_LOCATION).unwrap();
     match connection
         .query_row(
-            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=:name",
-            &[(":name", name)],
+            "SELECT count(*) FROM config WHERE server = :server",
+            &[(":server", server)],
             |row| row.get(0),
         )
         .expect("err:")
@@ -60,36 +58,22 @@ fn init_table(name: &str) {
                 ("it", "https://it.wikipedia.org/w/api.php"),
                 ("ar", "https://ar.wikipedia.org/w/api.php"),
             ];
-            connection
-                .execute(
-                    format!(
-                        "CREATE TABLE IF NOT EXISTS {} 
-                    (
-                        alias TEXT NOT NULL UNIQUE,
-                        endpoint TEXT
-                    )",
-                        name
-                    )
-                    .as_str(),
-                    [],
-                )
-                .unwrap();
 
             let mut statement = connection
                 .prepare(
-                    format!(
-                        "
-                        INSERT INTO {} VALUES (:alias, :endpoint)
+                    "
+                        INSERT INTO config VALUES (:server, :alias, :endpoint)
                         ",
-                        name
-                    )
-                    .as_str(),
                 )
                 .unwrap();
 
             for value in default_values.into_iter() {
                 statement
-                    .execute(&[(":alias", value.0), (":endpoint", value.1)])
+                    .execute(&[
+                        (":server", server),
+                        (":alias", value.0),
+                        (":endpoint", value.1),
+                    ])
                     .unwrap();
             }
         }
@@ -113,7 +97,7 @@ impl EventHandler for Handler {
         let client = reqwest::Client::new();
 
         if QUERY_REGEX.is_match(&msg.content) {
-            init_table(&server);
+            init_server(&server);
 
             let captures = QUERY_REGEX.captures_iter(&msg.content);
             let mut captured_text = Vec::<Search>::new();
@@ -216,18 +200,15 @@ impl EventHandler for Handler {
         };
     }
 
-    async fn guild_delete(&self, _: Context, _: GuildUnavailable, guild: Option<Guild>) {
-        match guild {
-            Some(g) => {
-                let server = format!("s{}", g.id);
-                let connection = Connection::open(DATABASE_LOCATION).unwrap();
-                match connection.execute(format!("DROP TABLE {}", server).as_str(), []) {
-                    Err(e) => println!("{}", e),
-                    _ => {}
-                }
-            }
-
-            None => {}
+    async fn guild_delete(&self, _: Context, guild: GuildUnavailable, _: Option<Guild>) {
+        let server = format!("s{}", guild.id);
+        let connection = Connection::open(DATABASE_LOCATION).unwrap();
+        match connection.execute(
+            "DELETE FROM config WHERE server = :server",
+            &[(":server", &server)],
+        ) {
+            Err(e) => println!("{}", e),
+            _ => {}
         }
     }
 
@@ -262,6 +243,7 @@ impl EventHandler for Handler {
                                 options.insert(option.name.to_string(), value.to_string());
                             }
                         }
+                        init_server(server);
                         match subcmd.name.as_str() {
                             "set" => {
                                 set_endpoint(&options["alias"], &options["endpoint"], server);
@@ -294,6 +276,11 @@ impl EventHandler for Handler {
 
 #[tokio::main]
 async fn main() {
+    create_dir_all("data").unwrap();
+    let connection = Connection::open(DATABASE_LOCATION).unwrap();
+
+    connection.execute("CREATE TABLE IF NOT EXISTS config (server TEXT NOT NULL, alias TEXT NOT NULL, endpoint TEXT NOT NULL, PRIMARY KEY (server, alias))", []).unwrap();
+
     let token = env::var("WIKISEARCH_TOKEN").expect("give me a token man");
     let application_id = env::var("WIKISEARCH_ID")
         .expect("give me an id man")
@@ -302,7 +289,7 @@ async fn main() {
     let mut client = Client::builder(&token)
         .event_handler(Handler)
         .application_id(application_id)
-        .intents(GatewayIntents::GUILD_MESSAGES)
+        .intents(GatewayIntents::GUILD_MESSAGES | GatewayIntents::GUILDS)
         .await
         .expect("can't create client");
     if let Err(why) = client.start().await {
