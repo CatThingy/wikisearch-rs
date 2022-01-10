@@ -24,9 +24,8 @@ pub async fn search(
     client: &reqwest::Client,
     server: &String,
 ) -> Result<CreateEmbed, Box<dyn Error>> {
-    let endpoint =
-        get_endpoint(search.alias, server).unwrap_or("https://en.wikipedia.org/w/api.php".to_string());
-    println!("{}", endpoint);
+    let endpoint = get_endpoint(search.alias, server)
+        .unwrap_or("https://en.wikipedia.org/w/api.php".to_string());
     let search_url = format!(
         "{}?action=query&format=json&list=search&formatversion=2&srwhat=text&srinfo=&srprop=&srlimit=1&srsearch={}",
         endpoint,
@@ -75,21 +74,14 @@ pub async fn search(
 
 fn get_endpoint(alias: Option<String>, server: &String) -> Result<String, Box<dyn Error>> {
     let unwrapped_alias = match alias {
-        Some (v) => v,
-        None => "default".to_string()
+        Some(v) => v,
+        None => "default".to_string(),
     };
-    println!("{:#?}", &server);
     let connection = rusqlite::Connection::open(DATABASE_LOCATION)?;
     let mut statement = connection
         .prepare("SELECT endpoint FROM config WHERE alias = :alias AND server = :server")?;
     Ok(statement.query_row(
-        &[
-            (":alias", &unwrapped_alias),
-            (":server", &server),
-        ],
-        |row| {
-            println!("{:?}", row.get::<_, String>(0));
-            Ok(row.get::<_, String>(0)?.to_string())
-        }
+        &[(":alias", &unwrapped_alias), (":server", &server)],
+        |row| Ok(row.get::<_, String>(0)?.to_string()),
     )?)
 }
