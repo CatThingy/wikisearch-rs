@@ -17,6 +17,8 @@ lazy_static! {
     // Backslash match at the end to prevent panic when unescaping unicode
     static ref API_EXCERPT_REGEX: Regex = Regex::new(r#""extract":"(?P<summary>.+?)\\?""#).unwrap();
     static ref PAGE_THUMBNAIL_REGEX: Regex = Regex::new(r#"<meta property="og:image" content="(?P<thumbnail>.+?)""#).unwrap();
+    static ref API_TO_PAGE_REGEX: Regex =
+        Regex::new(r"(?P<suffix>w/api.php)").unwrap();
 }
 
 pub async fn search(
@@ -38,11 +40,11 @@ pub async fn search(
     let mut e = CreateEmbed::default();
     match API_TITLE_REGEX.captures(&body) {
         Some(v) => {
-            let page_url = format!(
-                "{}/wiki/{}",
-                endpoint,
-                &utf8_percent_encode(&v["title"], NON_ALPHANUMERIC).collect::<String>()
-            );
+            let mut page_url = API_TO_PAGE_REGEX.replace(&endpoint, "wiki/").into_owned();
+            page_url
+                .push_str(&utf8_percent_encode(&v["title"], NON_ALPHANUMERIC).collect::<String>());
+            // &utf8_percent_encode(&v["title"], NON_ALPHANUMERIC).collect::<String>()
+            // );
             let page_text = client.get(&page_url).send().await?.text().await?;
 
             info_url
@@ -85,3 +87,4 @@ fn get_endpoint(alias: Option<String>, server: &String) -> Result<String, Box<dy
         |row| Ok(row.get::<_, String>(0)?.to_string()),
     )?)
 }
+

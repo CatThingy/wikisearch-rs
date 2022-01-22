@@ -246,18 +246,34 @@ impl EventHandler for Handler {
                             }
                         }
                         init_server(server);
+                        let perms = command
+                            .member
+                            .as_ref()
+                            .map(|m| m.permissions.unwrap())
+                            .unwrap();
+
                         match subcmd.name.as_str() {
                             "set" => {
-                                match set_endpoint(&options["alias"], &options["endpoint"], server)
-                                {
-                                    Ok(v) => v,
-                                    Err(e) => format!("An error occured: {:?}", e),
+                                if perms.manage_messages() {
+                                    match set_endpoint(&options["alias"], &options["url"], server) {
+                                        Ok(v) => v,
+                                        Err(e) => format!("An error occured: {:?}", e),
+                                    }
+                                } else {
+                                    "You do not have permission to do that.".to_string()
                                 }
                             }
-                            "delete" => match delete_endpoint(&options["alias"], server) {
-                                Ok(v) => v,
-                                Err(e) => format!("An error occured: {:?}", e),
-                            },
+
+                            "delete" => {
+                                if perms.manage_messages() {
+                                    match delete_endpoint(&options["alias"], server) {
+                                        Ok(v) => v,
+                                        Err(e) => format!("An error occured: {:?}", e),
+                                    }
+                                } else {
+                                    "You do not have permission to do that.".to_string()
+                                }
+                            }
                             "list" => match all_endpoints(server) {
                                 Ok(v) => v,
                                 Err(e) => format!("An error occured: {:?}", e),
